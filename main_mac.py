@@ -3,7 +3,7 @@ import time
 import uuid
 import json
 import requests
-import cups  # Replace win32print with cups for macOS
+import cups  # Using cups for macOS printer management
 import firebase_admin
 from firebase_admin import credentials, db
 import customtkinter as ctk
@@ -18,6 +18,9 @@ import subprocess
 from PIL import Image
 import sys
 import tempfile
+
+# Set environment variable to silence Tk deprecation warning on macOS
+os.environ["TK_SILENCE_DEPRECATION"] = "1"
 
 # Configure logging for detailed event tracking
 logging.basicConfig(
@@ -89,7 +92,6 @@ def update_connection_status(user_id, status):
         logging.info(f"Connection status for user {user_id} set to {status}.")
     except Exception as e:
         logging.error(f"Error updating connection status: {e}")
-       
 
 # ------------------ File Download and Printing ------------------
 def load_config():
@@ -157,10 +159,7 @@ def auto_print_pdf(file_path, settings):
             return False
     
     try:
-        # Create a CUPS connection
         conn = cups.Connection()
-        
-        # Set options based on settings
         options = {}
         
         # Map color mode
@@ -182,7 +181,6 @@ def auto_print_pdf(file_path, settings):
         if paper_size:
             options['media'] = paper_size
         
-        # Print the PDF
         job_id = conn.printFile(printer_name, file_path, "PrinterSync Job", options)
         logging.info(f"Print job successful for {file_path} on {printer_name}, job ID: {job_id}")
         return True
@@ -222,12 +220,11 @@ def get_system_info():
         public_ip = "Unknown"
         location_data = {}
     
-    # Get macOS specific information
     mac_version = "Unknown"
     try:
         mac_version = subprocess.check_output(["sw_vers", "-productVersion"]).decode().strip()
-    except:
-        pass
+    except Exception as e:
+        logging.error(f"Error retrieving macOS version: {e}")
     
     return {
         "hostname": socket.gethostname(),
@@ -256,15 +253,12 @@ def upload_system_info(user_id):
         user_snapshot = users_ref.order_by_child("token").equal_to(user_id).get()
         user_info = next(iter(user_snapshot.values()))
         user = user_info['id']
-        
         db.reference(f"users/{user}/system_info").set(system_info)
         logging.info(f"System info uploaded for user {user_id}.")
     except Exception as e:
         logging.error(f"Error uploading system info: {e}")
 
 # ------------------ macOS Menu Bar Management ------------------
-# This will be implemented using rumps in a production environment
-# For now, we'll use a simple implementation that works in the sandbox
 def create_menu_bar_app(app):
     """Create a menu bar app for macOS."""
     def on_show():
@@ -274,11 +268,11 @@ def create_menu_bar_app(app):
     def on_exit():
         app.quit_app()
     
-    # In a real macOS environment, this would use rumps
-    # For now, we'll create a simple menu using tkinter
+    # For debugging, we use a toplevel window with a distinct background color
     menu_window = ctk.CTkToplevel(app)
     menu_window.title("PrinterSync Menu")
     menu_window.geometry("200x100")
+    menu_window.configure(fg_color="#DDDDDD")  # Debug color
     
     show_button = ctk.CTkButton(menu_window, text="Show App", command=on_show)
     show_button.pack(pady=10)
@@ -303,14 +297,14 @@ class PrinterApp(ctk.CTk):
         self.menu_bar = None
         self.listener = None
 
-        # Window setup - Modern macOS style
+        # Window setup - try a modern macOS style appearance
         self.title("PrinterSync Pro")
         self.geometry("1100x800")
-        ctk.set_appearance_mode("system")  # Use system appearance
+        ctk.set_appearance_mode("dark")  # Try dark mode; experiment with "light" if needed
         ctk.set_default_color_theme("blue")
         self.minsize(900, 650)
         
-        # Set custom colors for modern material design
+        # Custom color definitions
         self.primary_color = "#2196F3"  # Material Blue
         self.success_color = "#4CAF50"  # Material Green
         self.warning_color = "#FFC107"  # Material Amber
@@ -320,22 +314,21 @@ class PrinterApp(ctk.CTk):
         self.text_color = "#212121"     # Primary text
         self.secondary_text = "#757575" # Secondary text
 
-        # Configure grid
+        # Configure grid behavior
         self.grid_columnconfigure(0, weight=1)
         self.grid_rowconfigure(3, weight=1)
 
-        # Header with modern design
+        # ---------------- Header Section ----------------
         self.header_frame = ctk.CTkFrame(self, corner_radius=15, fg_color="#1976D2")
         self.header_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
         
-        # App logo and title in header
         self.header_content = ctk.CTkFrame(self.header_frame, fg_color="transparent")
         self.header_content.pack(pady=15, padx=20, fill="x")
         
         self.title_label = ctk.CTkLabel(
             self.header_content,
             text="PrinterSync Pro",
-            font=("SF Pro Display", 32, "bold"),  # Modern macOS font
+            font=("SF Pro Display", 32, "bold"),
             text_color="#FFFFFF"
         )
         self.title_label.pack(side="left", padx=10)
@@ -348,7 +341,7 @@ class PrinterApp(ctk.CTk):
         )
         self.subtitle_label.pack(side="left", padx=10)
 
-        # Token input with card design
+        # ---------------- Token Input Section ----------------
         self.token_frame = ctk.CTkFrame(self, corner_radius=15, fg_color=self.card_color)
         self.token_frame.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
         
@@ -395,7 +388,7 @@ class PrinterApp(ctk.CTk):
         )
         self.submit_button.pack(side="right", pady=10, padx=(15, 0))
 
-        # Connection status with modern indicator
+        # ---------------- Connection Status Section ----------------
         self.status_frame = ctk.CTkFrame(self, corner_radius=10, fg_color=self.card_color)
         self.status_frame.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
         
@@ -410,14 +403,14 @@ class PrinterApp(ctk.CTk):
         )
         self.status_label.pack(side="left", pady=10)
 
-        # Main content area with tabs
+        # ---------------- Main Content Area ----------------
         self.main_frame = ctk.CTkFrame(self, corner_radius=15, fg_color="transparent")
         self.main_frame.grid(row=3, column=0, padx=20, pady=10, sticky="nsew")
         self.main_frame.grid_columnconfigure(0, weight=1)
         self.main_frame.grid_rowconfigure(1, weight=1)
         self.main_frame.grid_remove()
         
-        # Tab navigation
+        # Tab Navigation
         self.tab_frame = ctk.CTkFrame(self.main_frame, corner_radius=0, fg_color="transparent")
         self.tab_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
         
@@ -441,13 +434,13 @@ class PrinterApp(ctk.CTk):
                 height=35,
                 command=lambda idx=i: self.switch_tab(idx)
             )
-            tab_button.pack(side="left", padx=(0 if i > 0 else 0, 10))
+            tab_button.pack(side="left", padx=(0 if i == 0 else 10))
             self.tab_buttons.append(tab_button)
         
-        # Content frames for each tab
+        # ---------------- Content Frames for Tabs ----------------
         self.content_frames = []
         
-        # Printers tab
+        # Printers Tab
         self.printers_content = ctk.CTkFrame(self.main_frame, corner_radius=15, fg_color=self.card_color)
         self.printers_content.grid(row=1, column=0, sticky="nsew")
         self.content_frames.append(self.printers_content)
@@ -486,7 +479,7 @@ class PrinterApp(ctk.CTk):
         )
         self.printers_list.pack(fill="both", expand=True)
         
-        # Jobs tab
+        # Jobs Tab
         self.jobs_content = ctk.CTkFrame(self.main_frame, corner_radius=15, fg_color=self.card_color)
         self.jobs_content.grid(row=1, column=0, sticky="nsew")
         self.jobs_content.grid_remove()
@@ -513,7 +506,7 @@ class PrinterApp(ctk.CTk):
         )
         self.jobs_table.pack(fill="both", expand=True)
         
-        # Logs tab
+        # Logs Tab
         self.logs_content = ctk.CTkFrame(self.main_frame, corner_radius=15, fg_color=self.card_color)
         self.logs_content.grid(row=1, column=0, sticky="nsew")
         self.logs_content.grid_remove()
@@ -557,14 +550,14 @@ class PrinterApp(ctk.CTk):
         )
         self.log_textbox.pack(fill="both", expand=True)
 
-        # Menu bar setup for macOS
+        # ---------------- Setup macOS Menu Bar ----------------
         self.menu_bar = create_menu_bar_app(self)
 
         # Event handlers
         self.protocol("WM_DELETE_WINDOW", self.on_minimize)
         self.after(100, self.check_update_queue)
 
-        # Load token
+        # Load token if available and auto-connect
         token = load_token()
         if token:
             self.token_entry.insert(0, token)
@@ -605,10 +598,10 @@ class PrinterApp(ctk.CTk):
             elif message['type'] == 'progress':
                 progress_bar = message['progress_bar']
                 try:
-                    if progress_bar.winfo_exists():  # Only update if the widget exists
+                    if progress_bar.winfo_exists():
                         progress_bar.set(message['value'])
                 except Exception as e:
-                    print(f"Error updating progress bar: {e}")
+                    logging.error(f"Error updating progress bar: {e}")
         self.after(100, self.check_update_queue)
 
     def on_connect(self):
@@ -622,7 +615,6 @@ class PrinterApp(ctk.CTk):
     def connect_to_printer(self, token):
         """Connect to Firebase and start processing jobs."""
         try:
-            # Initialize Firebase if not already initialized
             if not firebase_admin._apps:
                 init_firebase()
                 
@@ -635,24 +627,16 @@ class PrinterApp(ctk.CTk):
             self.user_id = token
             update_connection_status(self.user_id, True)
             
-            # Update UI
+            # Update UI to show connected state
             self.after(0, lambda: self.status_indicator.configure(fg_color=self.success_color))
             self.after(0, lambda: self.status_label.configure(text="Connected"))
             self.after(0, lambda: self.main_frame.grid())
             
-            # Save token for future use
             save_token(token)
-            
-            # Upload system info
             upload_system_info(self.user_id)
-            
-            # Update printer list
             self.refresh_printers()
-            
-            # Start listening for print jobs
             self.start_job_listener()
             
-            # Log success
             self.update_queue.put({'type': 'log', 'message': f"Connected successfully with token: {token}"})
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Connection error: {e}"})
@@ -661,14 +645,11 @@ class PrinterApp(ctk.CTk):
     def refresh_printers(self):
         """Update the list of available printers."""
         try:
-            # Clear existing printer list
             for widget in self.printers_list.winfo_children():
                 widget.destroy()
             
-            # Get printers
             self.printers = update_printer_list(self.user_id)
             
-            # Add printers to UI with modern card design
             if not self.printers:
                 no_printers_label = ctk.CTkLabel(
                     self.printers_list,
@@ -678,7 +659,7 @@ class PrinterApp(ctk.CTk):
                 )
                 no_printers_label.pack(pady=20)
             
-            for i, printer in enumerate(self.printers):
+            for printer in self.printers:
                 printer_card = ctk.CTkFrame(
                     self.printers_list,
                     corner_radius=10,
@@ -736,8 +717,6 @@ class PrinterApp(ctk.CTk):
     def select_printer(self, printer):
         """Set the selected printer as default."""
         try:
-            # In macOS, we would use CUPS to set default printer
-            # For now, just log the selection
             self.update_queue.put({'type': 'log', 'message': f"Selected printer: {printer}"})
             messagebox.showinfo("Printer Selected", f"Selected printer: {printer}")
         except Exception as e:
@@ -754,7 +733,6 @@ class PrinterApp(ctk.CTk):
             user_info = next(iter(user_snapshot.values()))
             user = user_info['id']
             
-            # Listen for new print jobs
             jobs_ref = db.reference(f"users/{user}/jobs")
             
             def on_job_added(event):
@@ -772,10 +750,8 @@ class PrinterApp(ctk.CTk):
     def process_job(self, user, job_key, job_data):
         """Process a print job."""
         try:
-            # Switch to Jobs tab
             self.after(0, lambda: self.switch_tab(1))
             
-            # Add job to UI with modern card design
             job_card = ctk.CTkFrame(
                 self.jobs_table,
                 corner_radius=10,
@@ -849,16 +825,12 @@ class PrinterApp(ctk.CTk):
             )
             settings_info.pack(side="right")
             
-            # Update job status in Firebase
             db.reference(f"users/{user}/jobs/{job_key}").update({"status": "processing"})
             
-            # Download file
             def update_progress(progress):
                 self.update_queue.put({'type': 'progress', 'progress_bar': progress_bar, 'value': progress})
             
             file_url = job_data.get('fileUrl')
-            
-            # Start download in a separate thread
             threading.Thread(
                 target=self.download_and_print,
                 args=(user, job_key, job_data, update_progress, status_label),
@@ -877,17 +849,12 @@ class PrinterApp(ctk.CTk):
         """Download and print a file."""
         try:
             file_url = job_data.get('fileUrl')
-            
-            # Update status
             self.after(0, lambda: status_label.configure(text="Downloading...", text_color=self.warning_color))
             
-            # Download file
             local_file = download_pdf_from_url(file_url, job_key, progress_callback)
             
-            # Update status
             self.after(0, lambda: status_label.configure(text="Printing...", text_color=self.warning_color))
             
-            # Print file
             printer_settings = {
                 "namePrinter": job_data.get('printer', ''),
                 "colorMode": job_data.get('colorMode', 'color'),
@@ -897,7 +864,6 @@ class PrinterApp(ctk.CTk):
             
             success = print_pdf(printer_settings, local_file)
             
-            # Update status
             if success:
                 self.after(0, lambda: status_label.configure(text="Completed", text_color=self.success_color))
                 db.reference(f"users/{user}/jobs/{job_key}").update({"status": "completed"})
@@ -925,29 +891,19 @@ class PrinterApp(ctk.CTk):
     def quit_app(self):
         """Properly quit the application."""
         try:
-            # Update connection status
             if self.user_id:
                 update_connection_status(self.user_id, False)
-            
-            # Stop listener
             if self.listener:
                 self.listener.close()
-            
-            # Set stop event
             self.stop_event.set()
-            
-            # Destroy window
             self.destroy()
         except Exception as e:
-            print(f"Error quitting app: {e}")
+            logging.error(f"Error quitting app: {e}")
             self.destroy()
 
 if __name__ == "__main__":
     try:
-        # Initialize Firebase
         init_firebase()
-        
-        # Start application
         app = PrinterApp()
         app.mainloop()
     except Exception as e:
