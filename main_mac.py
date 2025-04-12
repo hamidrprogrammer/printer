@@ -15,14 +15,12 @@ import platform
 import logging
 from concurrent.futures import ThreadPoolExecutor
 import subprocess
-
-from PySide2.QtWidgets import (
-    QApplication, QWidget, QVBoxLayout, QHBoxLayout, QGridLayout,
-    QLabel, QLineEdit, QPushButton, QFrame, QScrollArea, QTextEdit,
-    QProgressBar, QSystemTrayIcon, QMenu, QTimer
-)
-from PySide2.QtGui import QIcon
-from PySide2.QtCore import Qt
+from PySide2.QtCore import Qt, Signal, QObject, QThreadPool, QRunnable, QTimer
+from PySide2.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
+                               QLabel, QLineEdit, QPushButton, QFrame, QScrollArea,
+                               QProgressBar, QTextEdit, QGridLayout, QSystemTrayIcon, 
+                               QMenu, QAction, QMessageBox, QSizePolicy)
+from PySide2.QtGui import QIcon, QColor
 from qt_material import apply_stylesheet
 
 sumatra_path = os.path.join(os.path.dirname(__file__), "SumatraPDF.exe")
