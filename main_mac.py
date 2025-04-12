@@ -378,7 +378,7 @@ class PrinterApp(QWidget):
         """Validate token and initiate connection."""
         print(self)
         print(str(self.token_entry.text()))
-        token = self.token_entry.text().strip()
+        token = str(self.token_entry.text())
         if not token:
             from PySide2.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", "Please enter a valid token!")
