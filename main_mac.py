@@ -4,8 +4,8 @@ import time
 import uuid
 import json
 import requests
-import win32print
-import win32api
+# import win32print
+# import win32api
 import firebase_admin
 from firebase_admin import credentials, db
 import threading
@@ -59,12 +59,12 @@ def init_firebase():
 def get_printers():
     """Retrieve list of installed printers (local and network)."""
     try:
-        printers_local = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)]
-        printers_network = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_NETWORK)]
-        printers = list(set(printers_local + printers_network))
-        if not printers:
-            logging.warning("No printers found.")
-        return printers
+        # printers_local = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)]
+        # printers_network = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_NETWORK)]
+        # printers = list(set(printers_local + printers_network))
+        # if not printers:
+        #     logging.warning("No printers found.")
+        # return printers
     except Exception as e:
         logging.error(f"Error retrieving printers: {e}")
         return []
@@ -150,19 +150,19 @@ def print_pdf(settings, file_path):
 
 def auto_print_pdf(file_path, settings):
     """Automatically print a PDF with optional DEVMODE settings."""
-    printer_name = settings.get("namePrinter", win32print.GetDefaultPrinter())
-    COOMEND = f"{settings.get('colorMode')},{settings.get('orientation')},paper={settings.get('paperSize')},"
+    # printer_name = settings.get("namePrinter", win32print.GetDefaultPrinter())
+    # COOMEND = f"{settings.get('colorMode')},{settings.get('orientation')},paper={settings.get('paperSize')},"
     try:
-        if not os.path.exists(sumatra_path):
-            raise FileNotFoundError("SumatraPDF not found")
-        subprocess.run([
-            sumatra_path,
-            "-print-to", printer_name,
-            "-silent",
-            "-print-settings", COOMEND,
-            file_path
-        ], check=True)
-        logging.info(f"پرینت موفق برای {file_path} روی {printer_name}")
+        # if not os.path.exists(sumatra_path):
+        #     raise FileNotFoundError("SumatraPDF not found")
+        # subprocess.run([
+        #     sumatra_path,
+        #     "-print-to", printer_name,
+        #     "-silent",
+        #     "-print-settings", COOMEND,
+        #     file_path
+        # ], check=True)
+        # logging.info(f"پرینت موفق برای {file_path} روی {printer_name}")
         return True
     except Exception as e:
         logging.error(f"خطا هنگام پرینت: {e}")
