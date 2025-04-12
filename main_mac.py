@@ -1,15 +1,21 @@
-import tkinter
-import customtkinter  # <- import the CustomTkinter module
+import tkinter as tk
 
-root_tk = tkinter.Tk()  # create the Tk window like you normally do
-root_tk.geometry("400x240")
-root_tk.title("CustomTkinter Test")
+class App(object):
 
-def button_function():
-    print("button pressed")
+    def __init__(self, parent):
 
-# Use CTkButton instead of tkinter Button
-button = customtkinter.CTkButton(master=root_tk, corner_radius=10, command=button_function)
-button.place(relx=0.5, rely=0.5, anchor=tkinter.CENTER)
-
-root_tk.mainloop()
+        self.root = parent
+        self.root.title("Main Frame")
+        self.frame = tk.Frame(parent)
+        self.frame.pack()
+        label = tk.Label(self.frame, text = "This is the main frame")
+        label.grid()
+        btn = tk.Button(self.frame, text= "Open the popup window")
+        btn.grid(row=1)
+        
+if __name__ == "__main__":
+  
+    root = tk.Tk()
+    app = App(root)
+    root.geometry("200x150")
+    root.mainloop()
