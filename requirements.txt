@@ -1,0 +1,15 @@
+"""
+Installation requirements for the macOS version of PrinterSync Pro
+"""
+
+# Core dependencies
+firebase-admin>=6.0.0
+customtkinter>=5.0.0
+Pillow>=9.0.0
+requests>=2.25.0
+
+# macOS specific dependencies
+pycups>=2.0.1
+PyObjC>=8.0
+py2app>=0.28.0
+rumps>=0.4.0
