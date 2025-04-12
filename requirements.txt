@@ -1,8 +1,4 @@
-"""
-Installation requirements for the macOS version of PrinterSync Pro
-"""
 
-# Core dependencies
 firebase-admin>=6.0.0
 customtkinter>=5.0.0
 Pillow>=9.0.0
