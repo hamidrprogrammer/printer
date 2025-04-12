@@ -374,7 +374,10 @@ class PrinterApp(QWidget):
                 self.update_print_jobs_ui(message['jobs'])
 
     def on_connect(self):
+      
         """Validate token and initiate connection."""
+        print(self)
+        print(self.token_entry)
         token = self.token_entry.text().strip()
         if not token:
             from PySide2.QtWidgets import QMessageBox
