@@ -1,34 +1,25 @@
+import toga
+import threading
+import queue
 import time
 import uuid
 import json
 import requests
-import cups  # Replace win32print with cups for macOS
+import cups
 import firebase_admin
 from firebase_admin import credentials, db
-import tkinter as tk
-from tkinter import ttk
-from tkinter import messagebox
-from tkinter import scrolledtext
-import threading
-import queue
-import socket
-import platform
 import logging
-from concurrent.futures import ThreadPoolExecutor
-import subprocess
-from PIL import Image
+import os
 import sys
 import tempfile
-import os
-
-# Configure logging for detailed event tracking
+from PIL import Image
+from toga.style import Pack
+from toga.style.pack import COLUMN, ROW
+# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [%(levelname)s] %(message)s",
-    handlers=[
-        logging.FileHandler("printer_app.log"),
-        logging.StreamHandler(sys.stdout)
-    ]
+    handlers=[logging.FileHandler("printer_app.log"), logging.StreamHandler(sys.stdout)]
 )
 
 # ------------------ Firebase Initialization ------------------
@@ -51,7 +42,7 @@ def init_firebase():
 
 # ------------------ Printer Management ------------------
 def get_printers():
-    """Retrieve list of installed printers (local and network)."""
+    """Retrieve list of installed printers."""
     try:
         conn = cups.Connection()
         printers = list(conn.getPrinters().keys())
@@ -93,21 +84,10 @@ def update_connection_status(user_id, status):
         logging.error(f"Error updating connection status: {e}")
 
 # ------------------ File Download and Printing ------------------
-def load_config():
-    """Load configuration from config.json."""
-    try:
-        with open("config.json", "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logging.error(f"Error loading config: {e}")
-        raise
-
 def download_file(url, save_path, progress_callback, timeout=30):
     """Download a file from a URL with progress tracking."""
     try:
-        headers = {
-            "Accept": "application/pdf",
-        }
+        headers = {"Accept": "application/pdf"}
         response = requests.get(url, headers=headers, stream=True, timeout=timeout)
         if response.status_code != 200:
             raise Exception(f"Download failed with status code: {response.status_code}")
@@ -146,8 +126,6 @@ def print_pdf(settings, file_path):
 def auto_print_pdf(file_path, settings):
     """Automatically print a PDF with optional settings for macOS."""
     printer_name = settings.get("namePrinter", "")
-    
-    # If no printer specified, use default
     if not printer_name:
         conn = cups.Connection()
         printers = conn.getPrinters()
@@ -156,34 +134,22 @@ def auto_print_pdf(file_path, settings):
         else:
             logging.error("No printers available")
             return False
-    
     try:
-        # Create a CUPS connection
         conn = cups.Connection()
-        
-        # Set options based on settings
         options = {}
-        
-        # Map color mode
-        color_mode = settings.get("colorMode", "")
-        if color_mode.lower() == "color":
+        color_mode = settings.get("colorMode", "").lower()
+        if color_mode == "color":
             options['ColorModel'] = 'RGB'
-        elif color_mode.lower() == "grayscale":
+        elif color_mode == "grayscale":
             options['ColorModel'] = 'Gray'
-        
-        # Map orientation
-        orientation = settings.get("orientation", "")
-        if orientation.lower() == "portrait":
-            options['orientation-requested'] = '3'  # Portrait
-        elif orientation.lower() == "landscape":
-            options['orientation-requested'] = '4'  # Landscape
-        
-        # Map paper size
+        orientation = settings.get("orientation", "").lower()
+        if orientation == "portrait":
+            options['orientation-requested'] = '3'
+        elif orientation == "landscape":
+            options['orientation-requested'] = '4'
         paper_size = settings.get("paperSize", "")
         if paper_size:
             options['media'] = paper_size
-        
-        # Print the PDF
         job_id = conn.printFile(printer_name, file_path, "PrinterSync Job", options)
         logging.info(f"Print job successful for {file_path} on {printer_name}, job ID: {job_id}")
         return True
@@ -222,14 +188,11 @@ def get_system_info():
         logging.error(f"Error retrieving IP or location: {e}")
         public_ip = "Unknown"
         location_data = {}
-    
-    # Get macOS specific information
     mac_version = "Unknown"
     try:
         mac_version = subprocess.check_output(["sw_vers", "-productVersion"]).decode().strip()
     except:
         pass
-    
     return {
         "hostname": socket.gethostname(),
         "ip": socket.gethostbyname(socket.gethostname()),
@@ -250,469 +213,188 @@ def get_system_info():
     }
 
 def upload_system_info(user_id):
-    """Upload system information to Firebase for support."""
+    """Upload system information to Firebase."""
     try:
         system_info = get_system_info()
         users_ref = db.reference("users")
         user_snapshot = users_ref.order_by_child("token").equal_to(user_id).get()
         user_info = next(iter(user_snapshot.values()))
         user = user_info['id']
-        
         db.reference(f"users/{user}/system_info").set(system_info)
         logging.info(f"System info uploaded for user {user_id}.")
     except Exception as e:
         logging.error(f"Error uploading system info: {e}")
 
-# ------------------ macOS Menu Bar Management ------------------
-# Placeholder implementation using Tkinter (replace with rumps for production)
-def create_menu_bar_app(app):
-    """Create a menu bar app for macOS."""
-    def on_show():
-        app.deiconify()
-        app.lift()
-
-    def on_exit():
-        app.quit_app()
-    
-    # Simple Tkinter menu window
-    menu_window = tk.Toplevel(app)
-    menu_window.title("PrinterSync Menu")
-    menu_window.geometry("200x100")
-    
-    show_button = tk.Button(menu_window, text="Show App", command=on_show, bg="#2196F3", fg="#FFFFFF", font=("SF Pro Text", 14))
-    show_button.pack(pady=10)
-    
-    exit_button = tk.Button(menu_window, text="Exit", command=on_exit, bg="#F44336", fg="#FFFFFF", font=("SF Pro Text", 14))
-    exit_button.pack(pady=10)
-    
-    # Hide the menu window initially
-    menu_window.withdraw()
-    
-    return menu_window
-
-# ------------------ Helper Function for Scrollable Frame ------------------
-def create_scrollable_frame(parent, bg="#FFFFFF"):
-    """Create a scrollable frame using Canvas and Scrollbar."""
-    canvas = tk.Canvas(parent, bg=bg)
-    scrollbar = tk.Scrollbar(parent, orient="vertical", command=canvas.yview)
-    scrollable_frame = tk.Frame(canvas, bg=bg)
-    
-    scrollable_frame.bind(
-        "<Configure>",
-        lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-    )
-    
-    canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
-    canvas.configure(yscrollcommand=scrollbar.set)
-    
-    scrollbar.pack(side="right", fill="y")
-    canvas.pack(side="left", fill="both", expand=True)
-    
-    return scrollable_frame
-
-# ------------------ GUI Application ------------------
-class PrinterApp(tk.Tk):
+# ------------------ Toga GUI Application ------------------
+class PrinterApp(toga.App):
     def __init__(self):
-        super().__init__()
+        super().__init__('PrinterSync Pro', 'com.example.printersync')
         self.stop_event = threading.Event()
         self.update_queue = queue.Queue()
         self.printers = []
         self.jobs = {}
         self.user_id = None
-        self.menu_bar = None
         self.listener = None
 
-        # Window setup
-        self.title("PrinterSync Pro")
-        self.geometry("1100x800")
-        self.minsize(900, 650)
+    def startup(self):
+        """Initialize the Toga application."""
+        self.main_window = toga.MainWindow(title="self.name", size=(1100, 800))
+        self.content_box = toga.Box(style=toga.style.Pack(direction=COLUMN))
+        self.main_window.content = self.content_box
+        self.show_token_input()
+        self.main_window.show()
+        self.check_update_queue()
         
-        # Define custom colors
-        self.primary_color = "#2196F3"  # Material Blue
-        self.success_color = "#4CAF50"  # Material Green
-        self.warning_color = "#FFC107"  # Material Amber
-        self.error_color = "#F44336"    # Material Red
-        self.bg_color = "#F5F5F5"       # Light background
-        self.card_color = "#FFFFFF"     # Card background
-        self.text_color = "#212121"     # Primary text
-        self.secondary_text = "#757575" # Secondary text
-
-        # Configure grid
-        self.grid_columnconfigure(0, weight=1)
-        self.grid_rowconfigure(3, weight=1)
-
-        # Header
-        self.header_frame = tk.Frame(self, bg="#1976D2")
-        self.header_frame.grid(row=0, column=0, padx=20, pady=20, sticky="ew")
-        
-        self.header_content = tk.Frame(self.header_frame, bg="#1976D2")
-        self.header_content.pack(pady=15, padx=20, fill="x")
-        
-        self.title_label = tk.Label(
-            self.header_content,
-            text="PrinterSync Pro",
-            font=("SF Pro Display", 32, "bold"),
-            bg="#1976D2",
-            fg="#FFFFFF"
-        )
-        self.title_label.pack(side="left", padx=10)
-        
-        self.subtitle_label = tk.Label(
-            self.header_content,
-            text="macOS Edition",
-            font=("SF Pro Text", 16),
-            bg="#1976D2",
-            fg="#E1F5FE"
-        )
-        self.subtitle_label.pack(side="left", padx=10)
-
-        # Token input
-        self.token_frame = tk.Frame(self, bg=self.card_color)
-        self.token_frame.grid(row=1, column=0, padx=20, pady=10, sticky="ew")
-        
-        self.token_header = tk.Label(
-            self.token_frame,
-            text="Connect Your Account",
-            font=("SF Pro Display", 18, "bold"),
-            bg=self.card_color,
-            fg=self.text_color
-        )
-        self.token_header.pack(pady=(15, 5), padx=20, anchor="w")
-        
-        self.token_description = tk.Label(
-            self.token_frame,
-            text="Enter your connection token to link this device with your account",
-            font=("SF Pro Text", 14),
-            bg=self.card_color,
-            fg=self.secondary_text
-        )
-        self.token_description.pack(pady=(0, 15), padx=20, anchor="w")
-        
-        self.token_input_frame = tk.Frame(self.token_frame, bg=self.card_color)
-        self.token_input_frame.pack(pady=5, padx=20, fill="x")
-        
-        self.token_entry = tk.Entry(
-            self.token_input_frame,
-            width=40,
-            font=("SF Pro Text", 14),
-            borderwidth=1
-        )
-        self.token_entry.pack(side="left", pady=10, fill="x", expand=True)
-        
-        self.submit_button = tk.Button(
-            self.token_input_frame,
-            text="Connect",
-            command=self.on_connect,
-            width=15,
-            font=("SF Pro Text", 14, "bold"),
-            bg=self.primary_color,
-            fg="#FFFFFF"
-        )
-        self.submit_button.pack(side="right", pady=10, padx=(15, 0))
-
-        # Connection status
-        self.status_frame = tk.Frame(self, bg=self.card_color)
-        self.status_frame.grid(row=2, column=0, padx=20, pady=5, sticky="ew")
-        
-        self.status_indicator = tk.Frame(self.status_frame, width=12, height=12, bg=self.error_color)
-        self.status_indicator.pack(side="left", padx=(15, 5), pady=10)
-        
-        self.status_label = tk.Label(
-            self.status_frame,
-            text="Disconnected",
-            font=("SF Pro Text", 14),
-            bg=self.card_color,
-            fg=self.text_color
-        )
-        self.status_label.pack(side="left", pady=10)
-
-        # Main content area
-        self.main_frame = tk.Frame(self, bg=self.card_color)
-        self.main_frame.grid(row=3, column=0, padx=20, pady=10, sticky="nsew")
-        self.main_frame.grid_columnconfigure(0, weight=1)
-        self.main_frame.grid_rowconfigure(1, weight=1)
-        self.main_frame.grid_remove()
-        
-        # Tab navigation
-        self.tab_frame = tk.Frame(self.main_frame, bg=self.card_color)
-        self.tab_frame.grid(row=0, column=0, sticky="ew", pady=(0, 10))
-        
-        self.tab_buttons = []
-        tab_data = [
-            {"name": "Printers", "icon": "🖨️"},
-            {"name": "Jobs", "icon": "📋"},
-            {"name": "Logs", "icon": "📊"}
-        ]
-        
-        for i, tab in enumerate(tab_data):
-            bg_color = self.primary_color if i == 0 else self.card_color
-            fg_color = "#FFFFFF" if i == 0 else self.text_color
-            tab_button = tk.Button(
-                self.tab_frame,
-                text=f"{tab['icon']} {tab['name']}",
-                font=("SF Pro Text", 14),
-                bg=bg_color,
-                fg=fg_color,
-                width=12,
-                command=lambda idx=i: self.switch_tab(idx)
-            )
-            tab_button.pack(side="left", padx=(0 if i > 0 else 0, 10))
-            self.tab_buttons.append(tab_button)
-        
-        # Content frames for each tab
-        self.content_frames = []
-        
-        # Printers tab
-        self.printers_content = tk.Frame(self.main_frame, bg=self.card_color)
-        self.printers_content.grid(row=1, column=0, sticky="nsew")
-        self.content_frames.append(self.printers_content)
-        
-        self.printers_header = tk.Frame(self.printers_content, bg=self.card_color)
-        self.printers_header.pack(fill="x", padx=20, pady=15)
-        
-        self.printers_title = tk.Label(
-            self.printers_header,
-            text="Available Printers",
-            font=("SF Pro Display", 20, "bold"),
-            bg=self.card_color,
-            fg=self.text_color
-        )
-        self.printers_title.pack(side="left")
-        
-        self.refresh_button = tk.Button(
-            self.printers_header,
-            text="Refresh",
-            command=self.refresh_printers,
-            bg=self.primary_color,
-            fg="#FFFFFF",
-            width=12,
-            font=("SF Pro Text", 14)
-        )
-        self.refresh_button.pack(side="right")
-        
-        self.printers_list_frame = tk.Frame(self.printers_content, bg=self.card_color)
-        self.printers_list_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        self.printers_list = create_scrollable_frame(self.printers_list_frame)
-        
-        # Jobs tab
-        self.jobs_content = tk.Frame(self.main_frame, bg=self.card_color)
-        self.jobs_content.grid(row=1, column=0, sticky="nsew")
-        self.jobs_content.grid_remove()
-        self.content_frames.append(self.jobs_content)
-        
-        self.jobs_header = tk.Frame(self.jobs_content, bg=self.card_color)
-        self.jobs_header.pack(fill="x", padx=20, pady=15)
-        
-        self.jobs_title = tk.Label(
-            self.jobs_header,
-            text="Print Jobs",
-            font=("SF Pro Display", 20, "bold"),
-            bg=self.card_color,
-            fg=self.text_color
-        )
-        self.jobs_title.pack(side="left")
-        
-        self.jobs_list_frame = tk.Frame(self.jobs_content, bg=self.card_color)
-        self.jobs_list_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        self.jobs_table = create_scrollable_frame(self.jobs_list_frame)
-        
-        # Logs tab
-        self.logs_content = tk.Frame(self.main_frame, bg=self.card_color)
-        self.logs_content.grid(row=1, column=0, sticky="nsew")
-        self.logs_content.grid_remove()
-        self.content_frames.append(self.logs_content)
-        
-        self.logs_header = tk.Frame(self.logs_content, bg=self.card_color)
-        self.logs_header.pack(fill="x", padx=20, pady=15)
-        
-        self.logs_title = tk.Label(
-            self.logs_header,
-            text="Event Logs",
-            font=("SF Pro Display", 20, "bold"),
-            bg=self.card_color,
-            fg=self.text_color
-        )
-        self.logs_title.pack(side="left")
-        
-        self.clear_logs_button = tk.Button(
-            self.logs_header,
-            text="Clear Logs",
-            bg="#E0E0E0",
-            fg=self.text_color,
-            width=12,
-            font=("SF Pro Text", 14),
-            command=self.clear_logs
-        )
-        self.clear_logs_button.pack(side="right")
-        
-        self.logs_frame = tk.Frame(self.logs_content, bg=self.card_color)
-        self.logs_frame.pack(fill="both", expand=True, padx=20, pady=10)
-        
-        self.log_textbox = scrolledtext.ScrolledText(
-            self.logs_frame,
-            font=("SF Pro Mono", 12),
-            bg="#FAFAFA",
-            fg="#000000",
-            height=20
-        )
-        self.log_textbox.pack(fill="both", expand=True)
-
-        # Menu bar setup
-        self.menu_bar = create_menu_bar_app(self)
-
-        # Event handlers
-        self.protocol("WM_DELETE_WINDOW", self.on_minimize)
-        self.after(100, self.check_update_queue)
-
-        # Load token
+        # Load token and connect if available
         token = load_token()
         if token:
-            self.token_entry.insert(0, token)
-            self.on_connect()
+            self.token_entry.value = token
+            self.on_connect(None)
 
-    def switch_tab(self, tab_index):
-        """Switch between tabs."""
-        for i, frame in enumerate(self.content_frames):
-            if i == tab_index:
-                frame.grid()
-            else:
-                frame.grid_remove()
-                
-        for i, button in enumerate(self.tab_buttons):
-            if i == tab_index:
-                button.configure(bg=self.primary_color, fg="#FFFFFF")
-            else:
-                button.configure(bg=self.card_color, fg=self.text_color)
+    def show_token_input(self):
+        """Display the token input interface."""
+        self.content_box.clear()
+        
+        # Header
+        header_box = toga.Box(style=toga.style.Pack(direction=ROW, padding=10))
+        title_label = toga.Label('PrinterSync Pro', style=toga.style.Pack(font_size=24))
+        subtitle_label = toga.Label('macOS Edition', style=toga.style.Pack(font_size=16))
+        header_box.add(title_label)
+        header_box.add(subtitle_label)
+        self.content_box.add(header_box)
+        
+        # Token input
+        token_frame = toga.Box(style=toga.style.Pack(direction=COLUMN, padding=10))
+        token_header = toga.Label('Connect Your Account', style=toga.style.Pack(font_size=18))
+        token_description = toga.Label(
+            'Enter your connection token to link this device with your account',
+            style=toga.style.Pack(font_size=14)
+        )
+        self.token_entry = toga.TextInput(
+            placeholder='Paste your token here',
+            style=toga.style.Pack(flex=1)
+        )
+        submit_button = toga.Button(
+            'Connect',
+            on_press=self.on_connect,
+            style=toga.style.Pack(width=150)
+        )
+        token_input_frame = toga.Box(style=toga.style.Pack(direction=ROW))
+        token_input_frame.add(self.token_entry)
+        token_input_frame.add(submit_button)
+        token_frame.add(token_header)
+        token_frame.add(token_description)
+        token_frame.add(token_input_frame)
+        self.content_box.add(token_frame)
+        
+        # Status
+        status_box = toga.Box(style=toga.style.Pack(direction=ROW, padding=10))
+        self.status_label = toga.Label('Disconnected', style=toga.style.Pack(color='red'))
+        status_box.add(self.status_label)
+        self.content_box.add(status_box)
 
-    def clear_logs(self):
-        """Clear the log textbox."""
-        self.log_textbox.delete("1.0", "end")
-        self.update_queue.put({'type': 'log', 'message': "Logs cleared"})
+    def show_connected_interface(self):
+        """Display the connected interface with tabs."""
+        self.content_box.clear()
+        
+        # Header
+        header_box = toga.Box(style=toga.style.Pack(direction=ROW, padding=10))
+        title_label = toga.Label('PrinterSync Pro', style=toga.style.Pack(font_size=24))
+        subtitle_label = toga.Label('macOS Edition', style=toga.style.Pack(font_size=16))
+        header_box.add(title_label)
+        header_box.add(subtitle_label)
+        self.content_box.add(header_box)
+        
+        # Status
+        status_box = toga.Box(style=toga.style.Pack(direction=ROW, padding=10))
+        self.status_label = toga.Label('Connected', style=toga.style.Pack(color='green'))
+        status_box.add(self.status_label)
+        self.content_box.add(status_box)
+        
+        # Tabs
+        self.tabs = toga.Tab()
+        self.printers_tab = toga.ScrollContainer(
+            content=toga.Box(style=toga.style.Pack(direction=COLUMN))
+        )
+        self.jobs_tab = toga.ScrollContainer(
+            content=toga.Box(style=toga.style.Pack(direction=COLUMN))
+        )
+        self.logs_tab = toga.ScrollContainer(
+            content=toga.Box(style=toga.style.Pack(direction=COLUMN))
+        )
+        self.log_textbox = toga.MultilineTextInput(
+            readonly=True,
+            style=toga.style.Pack(flex=1)
+        )
+        self.logs_tab.content.add(self.log_textbox)
+        self.tabs.add('Printers', self.printers_tab)
+        self.tabs.add('Jobs', self.jobs_tab)
+        self.tabs.add('Logs', self.logs_tab)
+        self.content_box.add(self.tabs)
+        
+        # Populate printers
+        self.refresh_printers()
 
-    def check_update_queue(self):
-        """Update UI based on queued messages."""
-        while not self.update_queue.empty():
-            message = self.update_queue.get()
-            if message['type'] == 'log':
-                self.log_textbox.insert("end", message['message'] + "\n")
-                self.log_textbox.see("end")
-            elif message['type'] == 'progress':
-                progress_var = message['progress_var']
-                try:
-                    progress_var.set(message['value'] * 100)  # Scale 0-1 to 0-100
-                except Exception as e:
-                    print(f"Error updating progress bar: {e}")
-        self.after(100, self.check_update_queue)
-
-    def on_connect(self):
-        """Validate token and initiate connection."""
-        token = self.token_entry.get().strip()
+    def on_connect(self, widget):
+        """Handle connection button press."""
+        token = self.token_entry.value.strip()
         if not token:
-            messagebox.showerror("Error", "Please enter a valid token!")
+            self.main_window.info_dialog('Error', 'Please enter a valid token!')
             return
-        threading.Thread(target=self.connect_to_printer, args=(token,), daemon=True).start()
+        self.add_background_task(lambda: self.connect_to_printer(token))
 
     def connect_to_printer(self, token):
         """Connect to Firebase and start processing jobs."""
         try:
             if not firebase_admin._apps:
                 init_firebase()
-                
             users_ref = db.reference("users")
             user_snapshot = users_ref.order_by_child("token").equal_to(token).get()
             if not user_snapshot:
-                self.after(0, lambda: messagebox.showerror("Error", "Invalid token!"))
+                self.main_window.invoke(lambda: self.main_window.info_dialog('Error', 'Invalid token!'))
                 return
             user_info = next(iter(user_snapshot.values()))
             self.user_id = token
             update_connection_status(self.user_id, True)
-            
-            # Update UI
-            self.after(0, lambda: self.status_indicator.configure(bg=self.success_color))
-            self.after(0, lambda: self.status_label.configure(text="Connected"))
-            self.after(0, lambda: self.main_frame.grid())
-            
+            self.main_window.invoke(lambda: self.status_label.set_text('Connected'))
+            self.main_window.invoke(lambda: self.status_label.style.update(color='green'))
+            self.main_window.invoke(lambda: self.show_connected_interface())
             save_token(token)
             upload_system_info(self.user_id)
-            self.refresh_printers()
+            self.main_window.invoke(lambda: self.refresh_printers())
             self.start_job_listener()
-            
             self.update_queue.put({'type': 'log', 'message': f"Connected successfully with token: {token}"})
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Connection error: {e}"})
-            self.after(0, lambda: messagebox.showerror("Error", f"Connection failed: {e}"))
+            self.main_window.invoke(lambda: self.main_window.info_dialog('Error', f"Connection failed: {e}"))
 
     def refresh_printers(self):
         """Update the list of available printers."""
         try:
-            for widget in self.printers_list.winfo_children():
-                widget.destroy()
-            
+            self.printers_tab.content.children = []
             self.printers = update_printer_list(self.user_id)
-            
             if not self.printers:
-                no_printers_label = tk.Label(
-                    self.printers_list,
-                    text="No printers found. Please check your printer connections.",
-                    font=("SF Pro Text", 14),
-                    bg=self.card_color,
-                    fg=self.secondary_text
+                no_printers_label = toga.Label(
+                    'No printers found. Please check your printer connections.',
+                    style=toga.style.Pack(padding=10)
                 )
-                no_printers_label.pack(pady=20)
-            
-            for i, printer in enumerate(self.printers):
-                printer_card = tk.Frame(
-                    self.printers_list,
-                    bg="#F9F9F9",
-                    borderwidth=1,
-                    relief="solid"
-                )
-                printer_card.pack(fill="x", padx=5, pady=5)
-                
-                printer_icon = tk.Label(
-                    printer_card,
-                    text="🖨️",
-                    font=("SF Pro Text", 20),
-                    bg="#F9F9F9"
-                )
-                printer_icon.pack(side="left", padx=(15, 10), pady=15)
-                
-                printer_info = tk.Frame(printer_card, bg="#F9F9F9")
-                printer_info.pack(side="left", fill="both", expand=True, pady=10)
-                
-                printer_name = tk.Label(
-                    printer_info,
-                    text=printer,
-                    font=("SF Pro Text", 14, "bold"),
-                    bg="#F9F9F9",
-                    fg=self.text_color,
-                    anchor="w"
-                )
-                printer_name.pack(anchor="w")
-                
-                printer_status = tk.Label(
-                    printer_info,
-                    text="Ready",
-                    font=("SF Pro Text", 12),
-                    bg="#F9F9F9",
-                    fg=self.success_color,
-                    anchor="w"
-                )
-                printer_status.pack(anchor="w")
-                
-                select_button = tk.Button(
-                    printer_card,
-                    text="Select",
-                    width=10,
-                    font=("SF Pro Text", 13),
-                    bg=self.primary_color,
-                    fg="#FFFFFF",
-                    command=lambda p=printer: self.select_printer(p)
-                )
-                select_button.pack(side="right", padx=15)
-            
+                self.printers_tab.content.add(no_printers_label)
+            else:
+                for printer in self.printers:
+                    printer_box = toga.Box(style=toga.style.Pack(direction=ROW, padding=5))
+                    icon_label = toga.Label('🖨️', style=toga.style.Pack(padding=5))
+                    name_label = toga.Label(printer, style=toga.style.Pack(flex=1, padding=5))
+                    status_label = toga.Label('Ready', style=toga.style.Pack(color='green', padding=5))
+                    select_button = toga.Button(
+                        'Select',
+                        on_press=lambda widget, p=printer: self.select_printer(p),
+                        style=toga.style.Pack(width=100)
+                    )
+                    printer_box.add(icon_label)
+                    printer_box.add(name_label)
+                    printer_box.add(status_label)
+                    printer_box.add(select_button)
+                    self.printers_tab.content.add(printer_box)
             self.update_queue.put({'type': 'log', 'message': f"Found {len(self.printers)} printers"})
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Error refreshing printers: {e}"})
@@ -721,201 +403,127 @@ class PrinterApp(tk.Tk):
         """Set the selected printer as default."""
         try:
             self.update_queue.put({'type': 'log', 'message': f"Selected printer: {printer}"})
-            messagebox.showinfo("Printer Selected", f"Selected printer: {printer}")
+            self.main_window.info_dialog('Printer Selected', f"Selected printer: {printer}")
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Error selecting printer: {e}"})
 
     def start_job_listener(self):
         """Start listening for print jobs from Firebase."""
-        try:
-            if self.listener:
-                self.listener.close()
-            
-            users_ref = db.reference("users")
-            user_snapshot = users_ref.order_by_child("token").equal_to(self.user_id).get()
-            user_info = next(iter(user_snapshot.values()))
-            user = user_info['id']
-            
-            jobs_ref = db.reference(f"users/{user}/jobs")
-            
-            def on_job_added(event):
-                if event.event_type == 'put' and event.path != '/' and event.data:
-                    job_key = event.path.lstrip('/')
-                    job_data = event.data
-                    if isinstance(job_data, dict) and job_data.get('status') == 'pending':
-                        self.process_job(user, job_key, job_data)
-            
-            self.listener = jobs_ref.listen(on_job_added)
-            self.update_queue.put({'type': 'log', 'message': "Started listening for print jobs"})
-        except Exception as e:
-            self.update_queue.put({'type': 'log', 'message': f"Error starting job listener: {e}"})
+        def listener_task():
+            try:
+                if self.listener:
+                    self.listener.close()
+                users_ref = db.reference("users")
+                user_snapshot = users_ref.order_by_child("token").equal_to(self.user_id).get()
+                user_info = next(iter(user_snapshot.values()))
+                user = user_info['id']
+                jobs_ref = db.reference(f"users/{user}/jobs")
+                
+                def on_job_added(event):
+                    if event.event_type == 'put' and event.path != '/' and event.data:
+                        job_key = event.path.lstrip('/')
+                        job_data = event.data
+                        if isinstance(job_data, dict) and job_data.get('status') == 'pending':
+                            self.main_window.invoke(lambda: self.process_job(user, job_key, job_data))
+                
+                self.listener = jobs_ref.listen(on_job_added)
+                self.update_queue.put({'type': 'log', 'message': "Started listening for print jobs"})
+            except Exception as e:
+                self.update_queue.put({'type': 'log', 'message': f"Error starting job listener: {e}"})
+        
+        threading.Thread(target=listener_task, daemon=True).start()
 
     def process_job(self, user, job_key, job_data):
         """Process a print job."""
         try:
-            self.after(0, lambda: self.switch_tab(1))
-            
-            job_card = tk.Frame(
-                self.jobs_table,
-                bg="#F9F9F9",
-                borderwidth=1,
-                relief="solid"
-            )
-            job_card.pack(fill="x", padx=5, pady=5)
-            
-            job_header = tk.Frame(job_card, bg="#F9F9F9")
-            job_header.pack(fill="x", padx=15, pady=(15, 5))
-            
-            job_title = tk.Label(
-                job_header,
-                text=f"Job: {job_key}",
-                font=("SF Pro Text", 14, "bold"),
-                bg="#F9F9F9",
-                fg=self.text_color
-            )
-            job_title.pack(side="left")
-            
-            job_time = tk.Label(
-                job_header,
-                text=time.strftime("%H:%M:%S"),
-                font=("SF Pro Text", 12),
-                bg="#F9F9F9",
-                fg=self.secondary_text
-            )
-            job_time.pack(side="right")
-            
-            job_content = tk.Frame(job_card, bg="#F9F9F9")
-            job_content.pack(fill="x", padx=15, pady=5)
-            
-            progress_frame = tk.Frame(job_content, bg="#F9F9F9")
-            progress_frame.pack(fill="x", pady=5)
-            
-            progress_var = tk.DoubleVar()
-            progress_bar = ttk.Progressbar(
-                progress_frame,
-                orient="horizontal",
-                length=400,
-                mode="determinate",
-                variable=progress_var
-            )
-            progress_bar.pack(side="left", fill="x", expand=True, padx=(0, 10))
-            
-            status_label = tk.Label(
-                progress_frame,
-                text="Downloading...",
-                font=("SF Pro Text", 12),
-                width=10,
-                bg="#F9F9F9",
-                fg=self.warning_color
-            )
-            status_label.pack(side="right")
-            
-            job_details = tk.Frame(job_card, bg="#F9F9F9")
-            job_details.pack(fill="x", padx=15, pady=(5, 15))
-            
-            printer_info = tk.Label(
-                job_details,
-                text=f"Printer: {job_data.get('printer', 'Default')}",
-                font=("SF Pro Text", 12),
-                bg="#F9F9F9",
-                fg=self.secondary_text
-            )
-            printer_info.pack(side="left")
-            
-            settings_info = tk.Label(
-                job_details,
-                text=f"Settings: {job_data.get('colorMode', 'Color')}, {job_data.get('paperSize', 'A4')}",
-                font=("SF Pro Text", 12),
-                bg="#F9F9F9",
-                fg=self.secondary_text
-            )
-            settings_info.pack(side="right")
-            
+            self.tabs.select_index(1)  # Switch to Jobs tab
+            job_box = toga.Box(style=toga.style.Pack(direction=COLUMN, padding=5))
+            job_header = toga.Box(style=toga.style.Pack(direction=ROW))
+            job_title = toga.Label(f"Job: {job_key}", style=toga.style.Pack(flex=1))
+            job_time = toga.Label(time.strftime("%H:%M:%S"))
+            job_header.add(job_title)
+            job_header.add(job_time)
+            progress_frame = toga.Box(style=toga.style.Pack(direction=ROW))
+            progress_bar = toga.ProgressBar(max=1.0, value=0)
+            status_label = toga.Label('Downloading...', style=toga.style.Pack(color='orange'))
+            progress_frame.add(progress_bar)
+            progress_frame.add(status_label)
+            job_details = toga.Box(style=toga.style.Pack(direction=ROW))
+            printer_info = toga.Label(f"Printer: {job_data.get('printer', 'Default')}")
+            settings_info = toga.Label(f"Settings: {job_data.get('colorMode', 'Color')}, {job_data.get('paperSize', 'A4')}")
+            job_details.add(printer_info)
+            job_details.add(settings_info)
+            job_box.add(job_header)
+            job_box.add(progress_frame)
+            job_box.add(job_details)
+            self.jobs_tab.content.add(job_box)
             db.reference(f"users/{user}/jobs/{job_key}").update({"status": "processing"})
-            
-            def update_progress(progress):
-                self.update_queue.put({'type': 'progress', 'progress_var': progress_var, 'value': progress})
-            
-            file_url = job_data.get('fileUrl')
-            
-            threading.Thread(
-                target=self.download_and_print,
-                args=(user, job_key, job_data, update_progress, status_label),
-                daemon=True
-            ).start()
-            
+            self.add_background_task(
+                lambda: self.download_and_print(user, job_key, job_data, progress_bar, status_label)
+            )
             self.update_queue.put({'type': 'log', 'message': f"Processing job: {job_key}"})
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Error processing job: {e}"})
-            db.reference(f"users/{user}/jobs/{job_key}").update({
-                "status": "error",
-                "error": str(e)
-            })
+            db.reference(f"users/{user}/jobs/{job_key}").update({"status": "error", "error": str(e)})
 
-    def download_and_print(self, user, job_key, job_data, progress_callback, status_label):
+    def download_and_print(self, user, job_key, job_data, progress_bar, status_label):
         """Download and print a file."""
         try:
             file_url = job_data.get('fileUrl')
-            
-            self.after(0, lambda: status_label.configure(text="Downloading...", fg=self.warning_color))
-            
+            self.main_window.invoke(lambda: status_label.set_text('Downloading...'))
+            def progress_callback(progress):
+                self.main_window.invoke(lambda: progress_bar.set_value(progress))
             local_file = download_pdf_from_url(file_url, job_key, progress_callback)
-            
-            self.after(0, lambda: status_label.configure(text="Printing...", fg=self.warning_color))
-            
+            self.main_window.invoke(lambda: status_label.set_text('Printing...'))
             printer_settings = {
                 "namePrinter": job_data.get('printer', ''),
                 "colorMode": job_data.get('colorMode', 'color'),
                 "orientation": job_data.get('orientation', 'portrait'),
                 "paperSize": job_data.get('paperSize', 'A4')
             }
-            
             success = print_pdf(printer_settings, local_file)
-            
             if success:
-                self.after(0, lambda: status_label.configure(text="Completed", fg=self.success_color))
+                self.main_window.invoke(lambda: status_label.set_text('Completed'))
+                self.main_window.invoke(lambda: status_label.style.update(color='green'))
                 db.reference(f"users/{user}/jobs/{job_key}").update({"status": "completed"})
             else:
-                self.after(0, lambda: status_label.configure(text="Failed", fg=self.error_color))
+                self.main_window.invoke(lambda: status_label.set_text('Failed'))
+                self.main_window.invoke(lambda: status_label.style.update(color='red'))
                 db.reference(f"users/{user}/jobs/{job_key}").update({
                     "status": "error",
                     "error": "Printing failed"
                 })
-            
             self.update_queue.put({'type': 'log', 'message': f"Job {job_key} {'completed' if success else 'failed'}"})
         except Exception as e:
-            self.after(0, lambda: status_label.configure(text="Error", fg=self.error_color))
+            self.main_window.invoke(lambda: status_label.set_text('Error'))
+            self.main_window.invoke(lambda: status_label.style.update(color='red'))
             self.update_queue.put({'type': 'log', 'message': f"Error in job {job_key}: {e}"})
-            db.reference(f"users/{user}/jobs/{job_key}").update({
-                "status": "error",
-                "error": str(e)
-            })
+            db.reference(f"users/{user}/jobs/{job_key}").update({"status": "error", "error": str(e)})
 
-    def on_minimize(self):
-        """Minimize to menu bar instead of closing."""
-        self.withdraw()
-        self.update_queue.put({'type': 'log', 'message': "Application minimized to menu bar"})
+    def check_update_queue(self):
+        """Update UI based on queued messages."""
+        while not self.update_queue.empty():
+            message = self.update_queue.get()
+            if message['type'] == 'log':
+                self.log_textbox.value += message['message'] + '\n'
+        self.app.loop.call_later(0.1, self.check_update_queue)
 
-    def quit_app(self):
-        """Properly quit the application."""
+    def shutdown(self):
+        """Handle application shutdown."""
         try:
             if self.user_id:
                 update_connection_status(self.user_id, False)
-            
             if self.listener:
                 self.listener.close()
-            
             self.stop_event.set()
-            self.destroy()
         except Exception as e:
-            print(f"Error quitting app: {e}")
-            self.destroy()
+            logging.error(f"Error shutting down app: {e}")
 
 if __name__ == "__main__":
     try:
         init_firebase()
         app = PrinterApp()
-        app.mainloop()
+        app.main_loop()
     except Exception as e:
         logging.error(f"Application error: {e}")
-        messagebox.showerror("Error", f"Application error: {e}")
+        # Toga doesn't have a built-in messagebox like tkinter, so log the error
