@@ -64,7 +64,7 @@ def get_printers():
         # printers = list(set(printers_local + printers_network))
         # if not printers:
         #     logging.warning("No printers found.")
-        # return printers
+        return ""
     except Exception as e:
         logging.error(f"Error retrieving printers: {e}")
         return []
