@@ -69,24 +69,6 @@ def get_printers():
         logging.error(f"Error retrieving printers: {e}")
         return []
 
-def update_printer_list(user_id):
-    """Update the printer list in Firebase for the given user."""
-    try:
-        printers = get_printers()
-        users_ref = db.reference("users")
-        user_snapshot = users_ref.order_by_child("token").equal_to(user_id).get()
-        if not user_snapshot:
-            logging.error(f"No user found with token: {user_id}")
-            return []
-        user_info = next(iter(user_snapshot.values()))
-        user = user_info['id']
-        db.reference(f"users/{user}/printers").set(printers)
-        logging.info(f"Printer list updated for user {user_id}.")
-        return printers
-    except Exception as e:
-        logging.error(f"Error updating printer list: {e}")
-        return []
-
 def update_connection_status(user_id, status):
     """Update the connection status of the user in Firebase."""
     try:
@@ -237,6 +219,7 @@ class PrinterApp(QWidget):
         self.printers = []
         self.jobs = {}
         self.user_id = None
+        self.user_key = None  # Added to store Firebase user key
         self.listener = None
         self.listener_update = None
         self.progress_bars = {}
@@ -341,6 +324,10 @@ class PrinterApp(QWidget):
         self.timer.timeout.connect(self.check_update_queue)
         self.timer.start(100)
 
+        # QTimer for checking printer changes
+        self.printer_timer = QTimer(self)
+        self.printer_timer.timeout.connect(self.check_printers)
+
         # Connect signals
         self.connection_success.connect(self.update_ui_after_connect)
         self.show_error.connect(self.show_error_message)
@@ -377,10 +364,12 @@ class PrinterApp(QWidget):
             if not user_snapshot:
                 self.show_error.emit("Invalid token!")
                 return
+            self.user_key = next(iter(user_snapshot.keys()))
             self.user_id = token
             update_connection_status(self.user_id, True)
             upload_system_info(self.user_id)
-            self.printers = update_printer_list(self.user_id)
+            self.printers = get_printers()
+            db.reference(f"users/{self.user_key}/printers").set(self.printers)
             self.connection_success.emit()
             save_token(token)
             self.listener_update = db.reference("users").listen(self.check_connection_status)
@@ -394,6 +383,23 @@ class PrinterApp(QWidget):
         self.main_frame.show()
         self.display_printers(self.printers)
         self.update_queue.put({'type': 'log', 'message': "Connected successfully."})
+        self.printer_timer.start(10000)
+
+    def set_printers_in_firebase(self, printers):
+        """Set the printer list in Firebase."""
+        try:
+            db.reference(f"users/{self.user_key}/printers").set(printers)
+            self.update_queue.put({'type': 'log', 'message': "Printer list updated in Firebase."})
+        except Exception as e:
+            self.update_queue.put({'type': 'log', 'message': f"Error updating printer list: {e}"})
+
+    def check_printers(self):
+        """Check for changes in the printer list and update if necessary."""
+        new_printers = get_printers()
+        if new_printers != self.printers:
+            self.printers = new_printers
+            self.set_printers_in_firebase(new_printers)
+            self.display_printers(new_printers)
 
     def display_printers(self, printers):
         """Display the list of available printers in the scroll area."""
@@ -412,8 +418,9 @@ class PrinterApp(QWidget):
 
     def refresh_printers(self):
         """Refresh the list of printers."""
-        if self.user_id:
-            self.printers = update_printer_list(self.user_id)
+        if self.user_key:
+            self.printers = get_printers()
+            self.set_printers_in_firebase(self.printers)
             self.display_printers(self.printers)
             self.update_queue.put({'type': 'log', 'message': "Printer list refreshed."})
 
@@ -429,6 +436,7 @@ class PrinterApp(QWidget):
                 self.status_label.setText("Disconnected")
                 self.show_error.emit("Invalid token!")
                 self.main_frame.hide()
+                self.printer_timer.stop()
         except Exception as e:
             logging.error(f"Error checking connection status: {e}")
 
@@ -540,6 +548,7 @@ class PrinterApp(QWidget):
             self.listener_update.close()
         if self.user_id:
             update_connection_status(self.user_id, False)
+        self.printer_timer.stop()
         self.tray_icon.hide()
         QApplication.quit()
 
