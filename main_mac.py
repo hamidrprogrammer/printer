@@ -383,12 +383,15 @@ class PrinterApp(QWidget):
             from PySide2.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Error", "Please enter a valid token!")
             return
+        print("threading")  
         threading.Thread(target=self.connect_to_printer, args=(token,), daemon=True).start()
 
     def connect_to_printer(self, token):
         """Connect to Firebase and start processing jobs."""
         try:
+            print("connect_to_printer")
             users_ref = db.reference("users")
+            print(users_ref)
             user_snapshot = users_ref.order_by_child("token").equal_to(token).get()
             if not user_snapshot:
                 from PySide2.QtWidgets import QMessageBox
@@ -404,6 +407,7 @@ class PrinterApp(QWidget):
             self.listenerUpdate = db.reference("users").listen(self.check_connection_status)
             self.listener = db.reference(f"print_jobs/{self.user_id}").listen(self.print_jobs_callback)
         except Exception as e:
+            print(e)
             self.update_queue.put({'type': 'log', 'message': f"Connection error: {e}"})
 
     def update_ui_after_connect(self):
