@@ -4,26 +4,23 @@ import time
 import uuid
 import json
 import requests
-# import win32print
-# import win32api
-import firebase_admin
-from firebase_admin import credentials, db
+import subprocess
 import threading
 import queue
 import socket
 import platform
 import logging
-from concurrent.futures import ThreadPoolExecutor
-import subprocess
-from PySide2.QtCore import Qt, Signal, QObject, QThreadPool, QRunnable, QTimer
-from PySide2.QtWidgets import (QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout,
-                               QLabel, QLineEdit, QPushButton, QFrame, QScrollArea,
-                               QProgressBar, QTextEdit, QGridLayout, QSystemTrayIcon, 
-                               QMenu, QAction, QMessageBox, QSizePolicy)
-from PySide2.QtGui import QIcon, QColor
+from PySide2.QtCore import Qt, Signal, QTimer
+from PySide2.QtWidgets import (
+    QApplication, QWidget, QVBoxLayout, QHBoxLayout,
+    QLabel, QLineEdit, QPushButton, QFrame, QScrollArea,
+    QProgressBar, QTextEdit, QGridLayout, QSystemTrayIcon,
+    QMenu, QAction, QMessageBox, QTableWidget, QTableWidgetItem
+)
+from PySide2.QtGui import QIcon
 from qt_material import apply_stylesheet
-
-sumatra_path = os.path.join(os.path.dirname(__file__), "SumatraPDF.exe")
+import firebase_admin
+from firebase_admin import credentials, db
 
 # Configure logging
 logging.basicConfig(
@@ -35,21 +32,17 @@ logging.basicConfig(
     ]
 )
 
-# ------------------ Firebase Initialization ------------------
+# Firebase Initialization
 def init_firebase():
-    """Initialize Firebase connection using service account credentials."""
+    """Initialize Firebase with the service account credentials."""
     try:
         if getattr(sys, 'frozen', False):
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
-            print(base_path)
-
         cred_path = os.getenv("FIREBASE_CRED_PATH", os.path.join(base_path, "admin-panel.json"))
-        print(cred_path)
         if not os.path.exists(cred_path):
             raise FileNotFoundError(f"Firebase credential file not found at {cred_path}")
-
         cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {
             "databaseURL": "https://admin-panel-printer-default-rtdb.europe-west1.firebasedatabase.app"
@@ -59,22 +52,25 @@ def init_firebase():
         logging.error(f"Failed to initialize Firebase: {e}")
         raise
 
-# ------------------ Printer Management ------------------
+# Printer Management
 def get_printers():
-    """Retrieve list of installed printers (local and network)."""
+    """Retrieve the list of available printers using lpstat on macOS."""
     try:
-        # printers_local = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_LOCAL)]
-        # printers_network = [printer[2] for printer in win32print.EnumPrinters(win32print.PRINTER_ENUM_NETWORK)]
-        # printers = list(set(printers_local + printers_network))
-        # if not printers:
-        #     logging.warning("No printers found.")
-        return ""
-    except Exception as e:
+        result = subprocess.run(["lpstat", "-p"], capture_output=True, text=True, check=True)
+        lines = result.stdout.splitlines()
+        printers = []
+        for line in lines:
+            if line.startswith("printer"):
+                parts = line.split()
+                if len(parts) > 1:
+                    printers.append(parts[1])
+        return printers
+    except subprocess.CalledProcessError as e:
         logging.error(f"Error retrieving printers: {e}")
         return []
 
 def update_printer_list(user_id):
-    """Update printer list in Firebase and return it."""
+    """Update the printer list in Firebase for the given user."""
     try:
         printers = get_printers()
         users_ref = db.reference("users")
@@ -92,7 +88,7 @@ def update_printer_list(user_id):
         return []
 
 def update_connection_status(user_id, status):
-    """Update device connection status in Firebase."""
+    """Update the connection status of the user in Firebase."""
     try:
         users_ref = db.reference("users")
         user_snapshot = users_ref.order_by_child("token").equal_to(user_id).get()
@@ -103,38 +99,29 @@ def update_connection_status(user_id, status):
     except Exception as e:
         logging.error(f"Error updating connection status: {e}")
 
-# ------------------ File Download and Printing ------------------
-def load_config():
-    """Load configuration from config.json."""
-    try:
-        with open("config.json", "r") as f:
-            return json.load(f)
-    except Exception as e:
-        logging.error(f"Error loading config: {e}")
-        raise
-
+# File Download and Printing
 def download_file(url, save_path, progress_callback, timeout=30):
-    """Download a file from a URL with progress tracking."""
+    """Download a file from a URL with progress updates."""
     try:
         headers = {"Accept": "application/pdf"}
         response = requests.get(url, headers=headers, stream=True, timeout=timeout)
-        if response.status_code != 200:
-            raise Exception(f"Download failed with status code: {response.status_code}")
+        response.raise_for_status()
         total_size = int(response.headers.get("content-length", 0))
         downloaded = 0
         with open(save_path, "wb") as file:
             for chunk in response.iter_content(chunk_size=8192):
-                file.write(chunk)
-                downloaded += len(chunk)
-                if total_size > 0:
-                    progress_callback(downloaded / total_size)
+                if chunk:
+                    file.write(chunk)
+                    downloaded += len(chunk)
+                    if total_size > 0:
+                        progress_callback(downloaded / total_size)
         logging.info(f"File downloaded successfully: {save_path}")
     except Exception as e:
         logging.error(f"Error downloading file: {e}")
         raise
 
 def download_pdf_from_url(file_url, file_key, progress_callback, dest_dir="downloads"):
-    """Download a PDF file based on file_key."""
+    """Download a PDF from a URL and save it locally."""
     try:
         if not os.path.exists(dest_dir):
             os.makedirs(dest_dir)
@@ -146,35 +133,38 @@ def download_pdf_from_url(file_url, file_key, progress_callback, dest_dir="downl
         raise
 
 def print_pdf(settings, file_path):
-    """Print a PDF file with specified printer settings."""
+    """Print a PDF file using the lp command on macOS."""
     if not os.path.exists(file_path):
         logging.error(f"File not found: {file_path}")
         return False
-    return auto_print_pdf(file_path, settings)
-
-def auto_print_pdf(file_path, settings):
-    """Automatically print a PDF with optional DEVMODE settings."""
-    # printer_name = settings.get("namePrinter", win32print.GetDefaultPrinter())
-    # COOMEND = f"{settings.get('colorMode')},{settings.get('orientation')},paper={settings.get('paperSize')},"
+    printer_name = settings.get("namePrinter")
+    if not printer_name:
+        logging.error("No printer specified.")
+        return False
+    cmd = ["lp", "-d", printer_name, file_path]
+    if "orientation" in settings:
+        orientation = settings["orientation"].lower()
+        if orientation == "landscape":
+            cmd.extend(["-o", "landscape"])
+        elif orientation == "portrait":
+            cmd.extend(["-o", "portrait"])
+    if "paperSize" in settings:
+        paper_size = settings["paperSize"]
+        cmd.extend(["-o", f"media={paper_size}"])
+    if "copies" in settings:
+        copies = settings["copies"]
+        cmd.extend(["-n", str(copies)])
     try:
-        # if not os.path.exists(sumatra_path):
-        #     raise FileNotFoundError("SumatraPDF not found")
-        # subprocess.run([
-        #     sumatra_path,
-        #     "-print-to", printer_name,
-        #     "-silent",
-        #     "-print-settings", COOMEND,
-        #     file_path
-        # ], check=True)
-        # logging.info(f"پرینت موفق برای {file_path} روی {printer_name}")
+        subprocess.run(cmd, check=True, capture_output=True, text=True)
+        logging.info(f"Print job sent to {printer_name} for {file_path}")
         return True
-    except Exception as e:
-        logging.error(f"خطا هنگام پرینت: {e}")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Error printing file: {e.stderr}")
         return False
 
-# ------------------ Token Management ------------------
+# Token Management
 def save_token(token):
-    """Save token to a local file."""
+    """Save the connection token to a file."""
     try:
         with open("token.txt", "w") as f:
             f.write(token)
@@ -183,7 +173,7 @@ def save_token(token):
         logging.error(f"Error saving token: {e}")
 
 def load_token():
-    """Load token from a local file."""
+    """Load the connection token from a file."""
     try:
         if os.path.exists("token.txt"):
             with open("token.txt", "r") as f:
@@ -193,14 +183,13 @@ def load_token():
         logging.error(f"Error loading token: {e}")
         return None
 
-# ------------------ System Information ------------------
+# System Information
 def get_system_info():
-    """Collect system information including IP and geolocation."""
+    """Collect system information including IP and location."""
     try:
         public_ip = requests.get("https://api.ipify.org", timeout=5).text
         location_data = requests.get(f"https://ipinfo.io/{public_ip}/json", timeout=5).json()
-    except Exception as e:
-        logging.error(f"Error retrieving IP or location: {e}")
+    except Exception:
         public_ip = "Unknown"
         location_data = {}
     return {
@@ -223,7 +212,7 @@ def get_system_info():
     }
 
 def upload_system_info(user_id):
-    """Upload system information to Firebase for support."""
+    """Upload system information to Firebase."""
     try:
         system_info = get_system_info()
         users_ref = db.reference("users")
@@ -235,8 +224,12 @@ def upload_system_info(user_id):
     except Exception as e:
         logging.error(f"Error uploading system info: {e}")
 
-# ------------------ GUI Application ------------------
+# GUI Application
 class PrinterApp(QWidget):
+    """Main application window for the printer application."""
+    connection_success = Signal()
+    show_error = Signal(str)
+
     def __init__(self):
         super().__init__()
         self.stop_event = threading.Event()
@@ -245,7 +238,8 @@ class PrinterApp(QWidget):
         self.jobs = {}
         self.user_id = None
         self.listener = None
-        self.listenerUpdate = None
+        self.listener_update = None
+        self.progress_bars = {}
 
         # Window setup
         self.setWindowTitle("PrinterSync Pro")
@@ -312,8 +306,10 @@ class PrinterApp(QWidget):
         jobs_layout = QVBoxLayout(self.jobs_frame)
         jobs_label = QLabel("Print Jobs")
         jobs_layout.addWidget(jobs_label)
-        self.jobs_table = QFrame()
-        self.jobs_table_layout = QGridLayout(self.jobs_table)
+        self.jobs_table = QTableWidget()
+        self.jobs_table.setColumnCount(6)
+        self.jobs_table.setHorizontalHeaderLabels(["Job ID", "Printer", "Status", "Progress", "Timestamp", "Action"])
+        self.jobs_table.horizontalHeader().setStretchLastSection(True)
         jobs_layout.addWidget(self.jobs_table)
         main_grid.addWidget(self.jobs_frame, 1, 0, 2, 1)
 
@@ -330,7 +326,7 @@ class PrinterApp(QWidget):
         main_layout.addWidget(self.main_frame, 3, 0)
         self.main_frame.hide()
 
-        # System tray setup (assuming an icon file "icon.png" exists)
+        # System tray setup
         self.tray_icon = QSystemTrayIcon(QIcon("icon.png"), self)
         menu = QMenu()
         show_action = menu.addAction("Show App")
@@ -345,123 +341,103 @@ class PrinterApp(QWidget):
         self.timer.timeout.connect(self.check_update_queue)
         self.timer.start(100)
 
+        # Connect signals
+        self.connection_success.connect(self.update_ui_after_connect)
+        self.show_error.connect(self.show_error_message)
+
         # Load token
         token = load_token()
         if token:
             self.token_entry.setText(token)
             self.on_connect()
 
+    def show_error_message(self, message):
+        """Display an error message dialog."""
+        QMessageBox.critical(self, "Error", message)
+
     def closeEvent(self, event):
-        """Minimize to system tray instead of closing."""
+        """Minimize to system tray on window close."""
         self.hide()
         event.ignore()
         self.update_queue.put({'type': 'log', 'message': "Application minimized to system tray."})
 
-    def clear_layout(self, layout):
-        """Clear all widgets from a layout."""
-        while layout.count():
-            child = layout.takeAt(0)
-            if child.widget():
-                child.widget().deleteLater()
-
-    def check_update_queue(self):
-        """Update UI based on queued messages."""
-        while not self.update_queue.empty():
-            message = self.update_queue.get()
-            if message['type'] == 'log':
-                self.log_textbox.append(message['message'])
-            elif message['type'] == 'progress':
-                progress_bar = message['progress_bar']
-                try:
-                    progress_bar.setValue(int(message['value'] * 100))
-                except Exception as e:
-                    print(f"Error updating progress bar: {e}")
-            elif message['type'] == 'print_jobs':
-                self.update_print_jobs_ui(message['jobs'])
-
     def on_connect(self):
-      
-        """Validate token and initiate connection."""
-        print(self)
-        print(str(self.token_entry.text()))
-        token = str(self.token_entry.text())
+        """Initiate connection to Firebase with the provided token."""
+        token = self.token_entry.text().strip()
         if not token:
-            from PySide2.QtWidgets import QMessageBox
-            QMessageBox.critical(self, "Error", "Please enter a valid token!")
+            self.show_error.emit("Please enter a valid token!")
             return
-        print("threading")  
         threading.Thread(target=self.connect_to_printer, args=(token,), daemon=True).start()
 
     def connect_to_printer(self, token):
-        """Connect to Firebase and start processing jobs."""
+        """Connect to Firebase and set up listeners."""
         try:
-            print("connect_to_printer")
             users_ref = db.reference("users")
-            print(users_ref)
             user_snapshot = users_ref.order_by_child("token").equal_to(token).get()
             if not user_snapshot:
-                from PySide2.QtWidgets import QMessageBox
-                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", "Invalid token!"))
+                self.show_error.emit("Invalid token!")
                 return
-            user_info = next(iter(user_snapshot.values()))
             self.user_id = token
             update_connection_status(self.user_id, True)
             upload_system_info(self.user_id)
             self.printers = update_printer_list(self.user_id)
-            QTimer.singleShot(0, self.update_ui_after_connect)
+            self.connection_success.emit()
             save_token(token)
-            self.listenerUpdate = db.reference("users").listen(self.check_connection_status)
+            self.listener_update = db.reference("users").listen(self.check_connection_status)
             self.listener = db.reference(f"print_jobs/{self.user_id}").listen(self.print_jobs_callback)
         except Exception as e:
-            print(e)
             self.update_queue.put({'type': 'log', 'message': f"Connection error: {e}"})
 
     def update_ui_after_connect(self):
-        """Update UI after successful connection."""
+        """Update the UI after a successful connection."""
         self.status_label.setText("Connected")
         self.main_frame.show()
         self.display_printers(self.printers)
         self.update_queue.put({'type': 'log', 'message': "Connected successfully."})
 
     def display_printers(self, printers):
-        """Display list of printers in UI."""
-        self.clear_layout(self.printers_list_layout)
+        """Display the list of available printers in the scroll area."""
+        while self.printers_list_layout.count():
+            child = self.printers_list_layout.takeAt(0)
+            if child.widget():
+                child.widget().deleteLater()
         for printer in printers:
             frame = QFrame()
             layout = QHBoxLayout(frame)
             label = QLabel(printer)
             layout.addWidget(label)
-            status_label = QLabel("Online")
+            status_label = QLabel("Online")  # Simplified status
             layout.addWidget(status_label)
             self.printers_list_layout.addWidget(frame)
 
     def refresh_printers(self):
-        """Refresh the printer list."""
+        """Refresh the list of printers."""
         if self.user_id:
             self.printers = update_printer_list(self.user_id)
             self.display_printers(self.printers)
             self.update_queue.put({'type': 'log', 'message': "Printer list refreshed."})
 
     def check_connection_status(self, event):
-        """Update device connection status in Firebase."""
+        """Check and maintain connection status."""
         try:
+            if not self.user_id:
+                return
             users_ref = db.reference("users")
             user_snapshot = users_ref.order_by_child("token").equal_to(self.user_id).get()
             if not user_snapshot:
                 save_token('')
                 self.status_label.setText("Disconnected")
-                from PySide2.QtWidgets import QMessageBox
-                QTimer.singleShot(0, lambda: QMessageBox.critical(self, "Error", "Invalid token!"))
-                return
+                self.show_error.emit("Invalid token!")
+                self.main_frame.hide()
         except Exception as e:
-            logging.error(f"Error updating connection status: {e}")
+            logging.error(f"Error checking connection status: {e}")
 
     def print_jobs_callback(self, event):
-        """Handle print job updates from Firebase."""
+        """Handle updates to print jobs from Firebase."""
+        if not self.user_id:
+            return
         jobs_ref = db.reference(f"print_jobs/{self.user_id}")
         jobs = jobs_ref.get()
-        if not jobs:
-            return
         if jobs:
             self.jobs = jobs
             self.update_queue.put({'type': 'print_jobs', 'jobs': self.jobs})
@@ -474,20 +450,11 @@ class PrinterApp(QWidget):
                     ).start()
 
     def process_single_job(self, job_id, job):
-        """Process a single print job with progress bar."""
+        """Process a single print job in a separate thread."""
         log = lambda msg: self.update_queue.put({'type': 'log', 'message': msg})
-        progress_bar = QProgressBar()
-        progress_bar.setRange(0, 100)
-        row = self.jobs_table_layout.rowCount()
-        self.jobs_table_layout.addWidget(progress_bar, row, 0, 1, 5)
-
         try:
             def update_progress(value):
-                self.update_queue.put({
-                    'type': 'progress',
-                    'progress_bar': progress_bar,
-                    'value': value
-                })
+                self.update_queue.put({'type': 'progress', 'job_id': job_id, 'value': value})
 
             local_file = download_pdf_from_url(
                 job.get("file_url"),
@@ -495,12 +462,12 @@ class PrinterApp(QWidget):
                 update_progress
             )
             success = print_pdf(job, local_file)
-
+            new_status = "completed" if success else "failed"
             db.reference(f"print_jobs/{self.user_id}/{job_id}").update({
-                "status": "completed" if success else "failed",
+                "status": new_status,
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             })
-            log(f"Print job {job_id} {'completed' if success else 'failed'}.")
+            log(f"Print job {job_id} {new_status}.")
         except Exception as e:
             log(f"Error processing job {job_id}: {e}")
             db.reference(f"print_jobs/{self.user_id}/{job_id}").update({
@@ -508,33 +475,33 @@ class PrinterApp(QWidget):
                 "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
             })
         finally:
-            QTimer.singleShot(1000, progress_bar.deleteLater)
+            self.update_queue.put({'type': 'job_finished', 'job_id': job_id})
 
     def update_print_jobs_ui(self, jobs):
-        """Update the print jobs table in UI."""
-        self.clear_layout(self.jobs_table_layout)
-        headers = ["Job ID", "Printer", "Status", "Timestamp", "Action"]
-        for col, header in enumerate(headers):
-            label = QLabel(header)
-            self.jobs_table_layout.addWidget(label, 0, col)
-        if jobs and isinstance(jobs, dict):
-            for i, (job_id, job) in enumerate(jobs.items(), start=1):
-                self.jobs_table_layout.addWidget(QLabel(job_id), i, 0)
-                self.jobs_table_layout.addWidget(QLabel(job.get('namePrinter', 'N/A')), i, 1)
-                status = job.get('status', 'N/A')
-                status_label = QLabel(status.capitalize())
-                self.jobs_table_layout.addWidget(status_label, i, 2)
-                self.jobs_table_layout.addWidget(QLabel(job.get('timestamp', 'N/A')), i, 3)
-                if status == "pending":
-                    cancel_btn = QPushButton("Cancel")
-                    cancel_btn.clicked.connect(lambda checked, j=job_id: self.cancel_job(j))
-                    self.jobs_table_layout.addWidget(cancel_btn, i, 4)
-        else:
-            label = QLabel("No active print jobs")
-            self.jobs_table_layout.addWidget(label, 1, 0, 1, 5)
+        """Update the print jobs table with current job data."""
+        self.jobs_table.setRowCount(0)
+        for row, (job_id, job) in enumerate(jobs.items()):
+            self.jobs_table.insertRow(row)
+            self.jobs_table.setItem(row, 0, QTableWidgetItem(job_id))
+            self.jobs_table.setItem(row, 1, QTableWidgetItem(job.get('namePrinter', 'N/A')))
+            status = job.get('status', 'N/A')
+            self.jobs_table.setItem(row, 2, QTableWidgetItem(status.capitalize()))
+            timestamp = job.get('timestamp', 'N/A')
+            self.jobs_table.setItem(row, 4, QTableWidgetItem(timestamp))
+            if status == "pending":
+                progress_bar = QProgressBar()
+                progress_bar.setRange(0, 100)
+                self.jobs_table.setCellWidget(row, 3, progress_bar)
+                self.progress_bars[job_id] = progress_bar
+                cancel_btn = QPushButton("Cancel")
+                cancel_btn.clicked.connect(lambda checked, j=job_id: self.cancel_job(j))
+                self.jobs_table.setCellWidget(row, 5, cancel_btn)
+            else:
+                self.jobs_table.setItem(row, 3, QTableWidgetItem("N/A"))
+                self.jobs_table.setItem(row, 5, QTableWidgetItem(""))
 
     def cancel_job(self, job_id):
-        """Cancel a print job."""
+        """Cancel a pending print job."""
         try:
             db.reference(f"print_jobs/{self.user_id}/{job_id}").update({
                 "status": "canceled",
@@ -544,17 +511,39 @@ class PrinterApp(QWidget):
         except Exception as e:
             self.update_queue.put({'type': 'log', 'message': f"Error canceling job {job_id}: {e}"})
 
+    def check_update_queue(self):
+        """Process messages from the update queue to update the UI."""
+        while not self.update_queue.empty():
+            message = self.update_queue.get()
+            msg_type = message['type']
+            if msg_type == 'log':
+                self.log_textbox.append(message['message'])
+            elif msg_type == 'progress':
+                job_id = message['job_id']
+                value = message['value']
+                if job_id in self.progress_bars:
+                    self.progress_bars[job_id].setValue(int(value * 100))
+            elif msg_type == 'job_finished':
+                job_id = message['job_id']
+                if job_id in self.progress_bars:
+                    progress_bar = self.progress_bars.pop(job_id)
+                    progress_bar.setValue(100)
+            elif msg_type == 'print_jobs':
+                self.update_print_jobs_ui(message['jobs'])
+
     def quit_app(self):
         """Cleanly exit the application."""
         self.stop_event.set()
         if self.listener:
             self.listener.close()
+        if self.listener_update:
+            self.listener_update.close()
         if self.user_id:
             update_connection_status(self.user_id, False)
         self.tray_icon.hide()
         QApplication.quit()
 
-# ------------------ Main Execution ------------------
+# Main Execution
 if __name__ == "__main__":
     init_firebase()
     app = QApplication(sys.argv)
