@@ -44,7 +44,7 @@ def init_firebase():
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
         cred_path = os.getenv("FIREBASE_CRED_PATH", os.path.join(base_path, "serviceAccountKey.json"))
-        cred = credentials.Certificate(cred_path)
+        cred = credentials.Certificate("serviceAccountKey.json")
         firebase_admin.initialize_app(cred, {
             "databaseURL": "https://admin-panel-printer-default-rtdb.europe-west1.firebasedatabase.app"
         })
