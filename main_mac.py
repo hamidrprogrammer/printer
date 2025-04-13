@@ -45,7 +45,7 @@ def init_firebase():
             base_path = os.path.dirname(os.path.abspath(__file__))
             print(base_path)
 
-        cred_path = os.getenv("FIREBASE_CRED_PATH", os.path.join(base_path, "serviceAccountKey.json"))
+        cred_path = os.getenv("FIREBASE_CRED_PATH", os.path.join(base_path, "admin-panel.json"))
         print(cred_path)
         if not os.path.exists(cred_path):
             raise FileNotFoundError(f"Firebase credential file not found at {cred_path}")
