@@ -43,8 +43,14 @@ def init_firebase():
             base_path = sys._MEIPASS
         else:
             base_path = os.path.dirname(os.path.abspath(__file__))
+            print(base_path)
+
         cred_path = os.getenv("FIREBASE_CRED_PATH", os.path.join(base_path, "serviceAccountKey.json"))
-        cred = credentials.Certificate("serviceAccountKey.json")
+        print(cred_path)
+        if not os.path.exists(cred_path):
+            raise FileNotFoundError(f"Firebase credential file not found at {cred_path}")
+
+        cred = credentials.Certificate(cred_path)
         firebase_admin.initialize_app(cred, {
             "databaseURL": "https://admin-panel-printer-default-rtdb.europe-west1.firebasedatabase.app"
         })
